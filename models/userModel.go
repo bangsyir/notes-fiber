@@ -14,13 +14,6 @@ type User struct {
 	// Posts    []Post `gorm:"onstraint:OnDelete:CASCADE"`
 }
 
-type UserApi struct {
-	ID       uint
-	Name     string
-	Username string
-	Email    string
-}
-
 // validator
 type ErrorResponse struct {
 	FailedField string

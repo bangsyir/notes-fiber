@@ -9,10 +9,3 @@ type Post struct {
 	UserID uint
 	User   User
 }
-
-type PostApi struct {
-	ID     uint
-	Title  string
-	Desc   string
-	UserID uint
-}

@@ -1,3 +1,4 @@
 test.db
 notes
 /public/*
+.env

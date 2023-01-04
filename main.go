@@ -21,11 +21,8 @@ func main() {
 		JSONDecoder: json.Unmarshal,
 	})
 
-	app.Static("/", "./public")
-
 	// fiber routing
-	router.AuthRoutes(app)
-	router.PostRoutes(app)
+	router.SetupRoutes(app)
 
 	// run fiber app
 	log.Fatal(app.Listen(":8000"))

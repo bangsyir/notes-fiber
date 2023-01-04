@@ -1,7 +1,9 @@
 package handler
 
 import (
+	"errors"
 	"net/http"
+	"net/mail"
 	"os"
 	"time"
 
@@ -10,14 +12,44 @@ import (
 	"github.com/bangsyir/notes/models"
 	"github.com/gofiber/fiber/v2"
 	"github.com/golang-jwt/jwt/v4"
-	"golang.org/x/crypto/bcrypt"
+	"gorm.io/gorm"
 )
 
 type User struct {
+	ID       uint
 	Name     string
 	Username string
 	Email    string
 	Password string
+}
+
+func GetUserByEmail(e string) (*models.User, error) {
+	db := database.DB
+	var user models.User
+	if err := db.Where(&models.User{Email: e}).Find(&user).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	return &user, nil
+}
+
+func GetUserByUsername(u string) (*models.User, error) {
+	db := database.DB
+	var user models.User
+	if err := db.Where(&models.User{Username: u}).Find(&user).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	return &user, nil
+}
+
+func valid(email string) bool {
+	_, err := mail.ParseAddress(email)
+	return err == nil
 }
 
 func Register(c *fiber.Ctx) error {
@@ -28,10 +60,6 @@ func Register(c *fiber.Ctx) error {
 		return c.Status(http.StatusBadRequest).JSON(err.Error())
 	}
 
-	errors := models.ValidateStruct(*user)
-	if errors != nil {
-		return c.Status(fiber.StatusBadRequest).JSON(errors)
-	}
 	// check email is available
 	userFind := database.DB.Where("email = ?", user.Email).First(&user)
 	if userFind.RowsAffected > 0 {
@@ -49,23 +77,58 @@ func Register(c *fiber.Ctx) error {
 }
 
 func Login(c *fiber.Ctx) error {
-	var login struct {
-		Email    string
-		Password string
-	}
-	if err := c.BodyParser(&login); err != nil {
-		return c.Status(fiber.StatusBadRequest).JSON(err.Error())
-	}
-	user := models.User{}
-	database.DB.Where("email = ?", login.Email).First(&user)
-
-	if user.ID == 0 {
-		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "user not found"})
+	type LoginInput struct {
+		Identiy  string `json:"identity"`
+		Password string `json:"password"`
 	}
 
-	err := bcrypt.CompareHashAndPassword([]byte(user.Password), []byte(login.Password))
-	if err != nil {
-		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "Invalid email or password"})
+	input := new(LoginInput)
+	var ud User
+
+	if err := c.BodyParser(&input); err != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"status": "error", "message": "Error on login request", "data": err})
+	}
+
+	identity := input.Identiy
+	password := input.Password
+
+	user, email, err := new(models.User), new(models.User), *new(error)
+	if valid(identity) {
+		email, err = GetUserByEmail(identity)
+		if err != nil {
+			return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{"status": "error", "message": "Error on email", "data": err})
+		}
+	} else {
+		user, err = GetUserByUsername(identity)
+		if err != nil {
+			return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{"status": "error", "message": "Error on username", "data": err})
+		}
+	}
+
+	if email == nil && user == nil {
+		return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{"status": "error", "message": "User not found", "data": err})
+	}
+
+	if email != nil {
+		ud = User{
+			ID:       email.ID,
+			Name:     email.Name,
+			Username: email.Username,
+			Password: email.Password,
+		}
+	}
+	if user != nil {
+		ud = User{
+			ID:       user.ID,
+			Name:     user.Name,
+			Username: user.Username,
+			Password: user.Password,
+		}
+	}
+
+	CheckPassword := helper.CheckPasswordhash(password, ud.Password)
+	if !CheckPassword {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"status": "error", "message": "Invalid password", "data": nil})
 	}
 
 	token := jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.MapClaims{
@@ -79,6 +142,6 @@ func Login(c *fiber.Ctx) error {
 		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "Failed to create token"})
 	}
 
-	c.Cookie(&fiber.Cookie{Name: "authorization", Value: tokenString, SameSite: "lax", HTTPOnly: true})
-	return c.Status(fiber.StatusOK).JSON("login success")
+	// c.Cookie(&fiber.Cookie{Name: "authorization", Value: tokenString, SameSite: "lax", HTTPOnly: true})
+	return c.Status(fiber.StatusOK).JSON(fiber.Map{"status": "success", "message": nil, "data": fiber.Map{"accessToken": tokenString}})
 }
